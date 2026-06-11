@@ -1,0 +1,104 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © CienPham
+
+//@version=6
+indicator("Midnight Open [CienPham]", shorttitle="MDO°", overlay=true)
+
+// ─── SETTINGS ───────────────────────────────────────────────────────────────
+grp = "Midnight Open"
+
+show_mdo        = input.bool(true,          "Show Midnight Open",           group=grp)
+mdo_color       = input.color(color.new(#C8A96E, 0), "Line Color",          group=grp)
+mdo_width       = input.int(1,              "Line Width",   minval=1, maxval=4, group=grp)
+mdo_style_str   = input.string("Solid",     "Line Style",   options=["Solid","Dashed","Dotted"], group=grp)
+show_label      = input.bool(true,          "Show Label",                   group=grp)
+label_txt       = input.string("00:00",     "Label Text",                   group=grp)
+label_size_str  = input.string("Small",     "Label Size",   options=["Tiny","Small","Normal","Large","Huge"], group=grp)
+label_color     = input.color(color.new(#C8A96E, 0), "Label Color",         group=grp)
+extend_to_eod   = input.bool(true,          "Extend to 23:59",              group=grp)
+timezone_str    = input.string("UTC",       "Timezone",     options=["UTC","America/New_York","Europe/London","Asia/Ho_Chi_Minh","Asia/Tokyo","Asia/Singapore"], group=grp)
+max_lines       = input.int(5,              "Max Lines",    minval=1, maxval=20, group=grp)
+
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+lineStyleOf(s) =>
+    switch s
+        "Dashed" => line.style_dashed
+        "Dotted" => line.style_dotted
+        => line.style_solid
+
+labelSizeOf(s) =>
+    switch s
+        "Tiny"   => size.tiny
+        "Normal" => size.normal
+        "Large"  => size.large
+        "Huge"   => size.huge
+        => size.small
+
+// ─── STATE ───────────────────────────────────────────────────────────────────
+var line[]  mdo_lines  = array.new<line>()
+var label[] mdo_labels = array.new<label>()
+
+// ─── MIDNIGHT DETECTION ──────────────────────────────────────────────────────
+// Detect new day (00:00) in the chosen timezone
+bar_hour   = hour(time, timezone_str)
+bar_minute = minute(time, timezone_str)
+
+prev_bar_hour   = hour(time[1], timezone_str)
+prev_bar_minute = minute(time[1], timezone_str)
+
+// True on the very first bar of a new day (00:00)
+is_midnight = bar_hour == 0 and bar_minute == 0 and (prev_bar_hour != 0 or prev_bar_minute != 0)
+
+// ─── DRAW ─────────────────────────────────────────────────────────────────────
+if show_mdo and is_midnight
+    mdo_price = open  // Midnight Open price = open of the 00:00 candle
+
+    // Calculate end bar: extend to end of same day (23:59)
+    // Number of bars in one day
+    bars_per_day  = int(86400 / timeframe.in_seconds())
+    end_bar_index = extend_to_eod ? bar_index + bars_per_day : bar_index + bars_per_day
+
+    // Draw horizontal line
+    new_line = line.new(
+         x1    = bar_index,
+         y1    = mdo_price,
+         x2    = end_bar_index,
+         y2    = mdo_price,
+         color = mdo_color,
+         width = mdo_width,
+         style = lineStyleOf(mdo_style_str),
+         xloc  = xloc.bar_index)
+    array.unshift(mdo_lines, new_line)
+
+    // Draw label at the left of the line (below the line)
+    if show_label
+        new_label = label.new(
+             x         = bar_index,
+             y         = mdo_price,
+             text      = label_txt,
+             color     = color.new(color.white, 100),
+             textcolor = label_color,
+             style     = label.style_label_up,
+             size      = labelSizeOf(label_size_str),
+             text_font_family = font.family_monospace,
+             xloc      = xloc.bar_index)
+        array.unshift(mdo_labels, new_label)
+
+    // Cleanup old lines beyond max_lines
+    while array.size(mdo_lines) > max_lines
+        line.delete(array.pop(mdo_lines))
+
+    while array.size(mdo_labels) > max_lines
+        label.delete(array.pop(mdo_labels))
+
+// ─── EXTEND LATEST LINE TO CURRENT BAR (realtime update) ─────────────────────
+// Keep the most recent MDO line extending to current bar until a new day starts
+if array.size(mdo_lines) > 0 and extend_to_eod
+    latest_line  = array.get(mdo_lines, 0)
+    line_start   = line.get_x1(latest_line)
+    bars_per_day = int(86400 / timeframe.in_seconds())
+    eod_bar      = line_start + bars_per_day
+
+    // Only extend if we haven't passed end of day
+    if bar_index <= eod_bar
+        line.set_x2(latest_line, bar_index)
